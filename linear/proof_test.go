@@ -14,13 +14,8 @@ func TestSimpleSchnorr(t *testing.T) {
 	a := &bls12381.G1{}
 	a.ScalarMult(x, g)
 
-	phi := &Statement{}
-	phi.X = make([]bls12381.G1, 1)
+	phi := NewStatement(1, 1)
 	phi.X[0] = *a
-
-	phi.F = make([][]bls12381.G1, 1)
-	phi.F[0] = make([]bls12381.G1, 1)
-
 	phi.F[0][0] = *g
 
 	w := &Witness{}
@@ -50,17 +45,12 @@ func TestDLOG(t *testing.T) {
 	b0.ScalarMult(x, g0)
 	b1.ScalarMult(x, g1)
 
-	phi := &Statement{}
-	phi.X = make([]bls12381.G1, 2)
+	phi := NewStatement(1, 2)
 	phi.X[0] = *b0
 	phi.X[1] = *b1
-
-	phi.F = make([][]bls12381.G1, 2)
-	phi.F[0] = make([]bls12381.G1, 1)
-	phi.F[1] = make([]bls12381.G1, 1)
-
 	phi.F[0][0] = *g0
 	phi.F[1][0] = *g1
+
 	w := &Witness{}
 	w.W = make([]bls12381.Scalar, 1)
 	w.W[0].Set(x)
@@ -109,16 +99,8 @@ func Test2CommitEq(t *testing.T) {
 	tmp.ScalarMult(r1, h1)
 	c1.Add(c1, tmp)
 
-	phi := &Statement{}
-	phi.F = make([][]bls12381.G1, 2)
-	for i := 0; i < 2; i++ {
-		phi.F[i] = make([]bls12381.G1, 3)
-		for j := 0; j < len(phi.F[i]); j++ {
-			phi.F[i][j].SetIdentity()
-		}
-	}
+	phi := NewStatement(3, 2)
 
-	phi.X = make([]bls12381.G1, 2)
 	phi.X[0] = *c0
 	phi.X[1] = *c1
 

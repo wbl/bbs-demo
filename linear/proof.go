@@ -155,3 +155,18 @@ func hashStatementAndCommitment(phi *Statement, pi *Proof) (*bls12381.Scalar, er
 	c.Random(hash)
 	return c, nil
 }
+
+func NewStatement(input, output int) *Statement {
+	phi := &Statement{}
+	phi.F = make([][]bls12381.G1, output)
+	phi.X = make([]bls12381.G1, output)
+	for i := 0; i < output; i++ {
+		phi.X[i].SetIdentity()
+		phi.F[i] = make([]bls12381.G1, input)
+		for j := 0; j < input; j++ {
+			phi.F[i][j].SetIdentity()
+		}
+	}
+	return phi
+
+}
