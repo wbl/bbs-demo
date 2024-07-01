@@ -170,3 +170,29 @@ func NewStatement(input, output int) *Statement {
 	return phi
 
 }
+
+// TODO: do we want this or expose as error with where?
+func Satisfied(phi *Statement, w *Witness) bool {
+	x := make([]bls12381.G1, OutputDimension(phi))
+	for i := 0; i < len(x); i++ {
+		x[i].SetIdentity()
+	}
+	if len(w.W) != InputDimension(phi) {
+		return false
+	}
+	t := &bls12381.G1{}
+	for i, row := range phi.F {
+		t.SetIdentity()
+		for j := 0; j < len(row); j++ {
+			t.ScalarMult(&w.W[j], &row[j])
+			x[i].Add(&x[i], t)
+		}
+	}
+
+	for i := 0; i < len(x); i++ {
+		if !phi.X[i].IsEqual(&x[i]) {
+			return false
+		}
+	}
+	return true
+}

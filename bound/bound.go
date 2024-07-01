@@ -83,11 +83,27 @@ func Prove(comm *bls12381.G1, p *Params, o *Opening, bitlength int) (*Proof, err
 	for i := 0; i < bitlength; i++ {
 		phi.F[bitlength+i][i].Add(bitcoms[i], negG)
 		phi.F[bitlength+i][2*bitlength+i] = *p.H
+		phi.F[bitlength+i][2*bitlength+i].Neg()
 		phi.X[bitlength+i].SetIdentity()
 		w.W[2*bitlength+i].Mul(digits[i], bitrs[i])
 	}
+
+	phi.F[2*bitlength][0] = *p.G
+
+	two := &bls12381.Scalar{}
+	two.SetUint64(2)
+	for i := 1; i < bitlength; i++ {
+		phi.F[2*bitlength][i].ScalarMult(two, &phi.F[2*bitlength][i-1])
+	}
+	phi.F[2*bitlength][3*bitlength] = *p.H
+	phi.X[2*bitlength] = *comm
+	w.W[3*bitlength] = *o.R
+
 	Pi := &Proof{}
 	Pi.Ci = bitcoms
+	if !linear.Satisfied(phi, w) {
+		return nil, fmt.Errorf("internal error")
+	}
 	Pi.Pi, err = linear.Prove(phi, w) // Todo: Check if right
 	if err != nil {
 		return nil, fmt.Errorf("error proving: %w", err)
@@ -95,6 +111,32 @@ func Prove(comm *bls12381.G1, p *Params, o *Opening, bitlength int) (*Proof, err
 	return Pi, nil
 }
 
-func Verify(comm *bls12381.G1, p *Params, bitlength uint32, pi *Proof) bool {
-	phi := &linear.Statement{}
+func Verify(comm *bls12381.G1, p *Params, bitlength int, pi *Proof) bool {
+	phi := linear.NewStatement(3*bitlength+1, 2*bitlength+1)
+	// Commitment opening
+	for i := 0; i < bitlength; i++ {
+		phi.X[i] = *pi.Ci[i]
+		phi.F[i][i] = *p.G
+		phi.F[i][bitlength+i] = *p.H
+	}
+
+	negG := &bls12381.G1{}
+	*negG = *p.G
+	negG.Neg()
+	for i := 0; i < bitlength; i++ {
+		phi.F[bitlength+i][i].Add(pi.Ci[i], negG)
+		phi.F[bitlength+i][2*bitlength+i] = *p.H
+		phi.F[bitlength+i][2*bitlength+i].Neg()
+		phi.X[bitlength+i].SetIdentity()
+	}
+	phi.F[2*bitlength][0] = *p.G
+
+	two := &bls12381.Scalar{}
+	two.SetUint64(2)
+	for i := 1; i < bitlength; i++ {
+		phi.F[2*bitlength][i].ScalarMult(two, &phi.F[2*bitlength][i-1])
+	}
+	phi.F[2*bitlength][3*bitlength] = *p.H
+	phi.X[2*bitlength] = *comm
+	return linear.Verify(phi, pi.Pi)
 }
