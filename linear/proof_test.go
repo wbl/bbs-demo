@@ -55,7 +55,7 @@ func TestDLOG(t *testing.T) {
 	w.W = make([]bls12381.Scalar, 1)
 	w.W[0].Set(x)
 
-	if !Satisfied(phi, w) {
+	if Satisfied(phi, w) != nil {
 		t.Errorf("can't get some")
 	}
 	pi, err := Prove(phi, w)

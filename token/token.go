@@ -3,6 +3,7 @@ package token
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 
 	"github.com/cloudflare/circl/ecc/bls12381"
 	"golang.org/x/crypto/blake2b"
@@ -19,8 +20,8 @@ type Showing struct {
 	attribute   []byte
 	ticket      *bls12381.G1
 	kComm       *bls12381.G1
-	kRangeProof bound.Proof
-	pi          linear.Proof
+	kRangeProof *bound.Proof
+	pi          *linear.Proof
 }
 
 // A is a signature (g0+s*g1+x*h0+m*h1)^1/(x+e). For now direct sign, but later will make it work indirectly.
@@ -34,7 +35,7 @@ type Token struct {
 
 // SignRequest, PreToken, SignResponse are for blind signing
 type SignRequest struct {
-	c         *bls12381.G1 // s*g0+m*h0+x*h1
+	c         *bls12381.G1 // s*g1+m*h0+x*h1
 	attribute []byte
 	pi        linear.Proof
 }
@@ -132,10 +133,11 @@ func MakeToken(sk *SigningKey, attribute []byte) (*Token, error) {
 	return t, nil
 }
 
-func verifyToken(pk *PublicKey, t *Token) error {
+func computeCommFromToken(t *Token) *bls12381.G1 {
 	comm := &bls12381.G1{}
 	tmp := &bls12381.G1{}
 	params := systemParams()
+
 	comm.ScalarMult(t.key, params.h0)
 	attrSclr := str2Scalar(t.attribute)
 	tmp.ScalarMult(attrSclr, params.h1)
@@ -144,6 +146,11 @@ func verifyToken(pk *PublicKey, t *Token) error {
 	comm.Add(tmp, comm)
 	comm.Add(comm, params.g0)
 
+	return comm
+}
+
+func verifyToken(pk *PublicKey, t *Token) error {
+	comm := computeCommFromToken(t)
 	keyadj := &bls12381.G2{}
 	keyadj.ScalarMult(t.e, bls12381.G2Generator())
 	keyadj.Add(keyadj, pk.w)
@@ -154,12 +161,126 @@ func verifyToken(pk *PublicKey, t *Token) error {
 	return errors.New("verification failed")
 }
 
-func ShowTokenWithLimit(t *Token, origin []byte) (*Showing, error) {
+func ShowTokenWithLimit(t *Token, origin []byte, bitlimit int, k int) (*Showing, error) {
+	// cdl translation:
+	// our g0 = their g1
+	// our g1 = their h0
+	// our h0 =  their h1
+	// our h1 = their h2
+	if k < 0 {
+		return nil, errors.New("incorrect parameters")
+	}
+	show := &Showing{}
+	params := systemParams()
+	show.attribute = append(show.attribute, t.attribute...)
+	r1 := &bls12381.Scalar{}
+	err := r1.Random(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("showtoken r1: %w", err)
+	}
+	show.aprime = &bls12381.G1{}
+	show.aprime.ScalarMult(r1, t.a)
+	comm := computeCommFromToken(t)
 
-	return nil, errors.New("unimplemented")
+	tmp := &bls12381.G1{}
+	tmp.ScalarMult(t.e, t.a)
+	tmp.Neg()
+	tmp.Add(tmp, comm)
+	show.abar = &bls12381.G1{}
+	show.abar.ScalarMult(r1, tmp)
+
+	r2 := &bls12381.Scalar{}
+	err = r2.Random(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("showtoken r2: %w", err)
+	}
+	show.d = &bls12381.G1{}
+	show.d.ScalarMult(r1, comm)
+	negR2 := &bls12381.Scalar{}
+	negR2.Set(r2)
+	negR2.Neg()
+	tmp.ScalarMult(negR2, params.g1)
+	show.d.Add(show.d, tmp)
+
+	oriG := &bls12381.G1{}
+	oriG.Hash(origin, []byte("origin generator"))
+
+	kOpen := &bls12381.Scalar{}
+	kOpen.Random(rand.Reader)
+	kSc := &bls12381.Scalar{}
+	kSc.SetUint64(uint64(k))
+	show.kComm = &bls12381.G1{}
+	show.kComm.ScalarMult(kSc, params.h0)
+	tmp.ScalarMult(kOpen, params.h1)
+	show.kComm.Add(show.kComm, tmp)
+
+	oriGexp := &bls12381.Scalar{}
+	oriGexp.Add(kSc, t.key)
+	oriGexp.Inv(oriGexp)
+	show.ticket = &bls12381.G1{}
+	show.ticket.ScalarMult(oriGexp, oriG)
+
+	show.kRangeProof, err = bound.Prove(show.kComm, &bound.Params{G: params.h0, H: params.h1}, &bound.Opening{K: kSc, R: kOpen}, bitlimit)
+	if err != nil {
+		return nil, fmt.Errorf("error in proving bound on k: %w", err)
+	}
+	// At this point we're here for the big event
+	phi := linear.NewStatement(7, 4)
+	w := &linear.Witness{}
+	w.W = make([]bls12381.Scalar, 7)
+
+	r3 := &bls12381.Scalar{}
+	r3.Inv(r1)
+	sprime := &bls12381.Scalar{}
+	sprime.Mul(r2, r3)
+	sprime.Neg()
+	sprime.Add(t.s, sprime)
+
+	w.W[0] = *t.e
+	w.W[0].Neg()
+	w.W[1] = *r2
+	w.W[2] = *r3
+	w.W[3] = *sprime
+	w.W[3].Neg()
+	w.W[4] = *t.key
+	w.W[5] = *kSc
+	w.W[6] = *kOpen
+
+	phi.F[0][0] = *show.aprime
+	phi.F[0][1] = *params.g1
+	phi.X[0] = *show.d
+	phi.X[0].Neg()
+	phi.X[0].Add(&phi.X[0], show.abar)
+
+	phi.F[1][2] = *show.d
+	phi.F[1][3] = *params.g1
+	phi.F[1][4] = *params.h0
+	phi.F[1][4].Neg()
+
+	demo := str2Scalar(show.attribute)
+	phi.X[1].ScalarMult(demo, params.h1)
+	phi.X[1].Add(&phi.X[1], params.g0)
+
+	phi.F[2][5] = *params.h0
+	phi.F[2][6] = *params.h1
+	phi.X[2] = *show.kComm
+
+	phi.F[3][4] = *show.ticket
+	phi.F[3][5] = *show.ticket
+	phi.X[3] = *oriG
+
+	err = linear.Satisfied(phi, w)
+	if err != nil {
+		return nil, fmt.Errorf("witness failure: %w", err)
+	}
+	show.pi, err = linear.Prove(phi, w)
+	if err != nil {
+		return nil, fmt.Errorf("proving failure: %w", err)
+	}
+	return show, nil
 }
 
-func VerifyShowing(s *Showing, pk *PublicKey) error {
+func VerifyShowing(s *Showing, pk *PublicKey, bitlimit int) error {
 	return errors.New("unimplemented")
 }
 

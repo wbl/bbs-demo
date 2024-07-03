@@ -101,8 +101,8 @@ func Prove(comm *bls12381.G1, p *Params, o *Opening, bitlength int) (*Proof, err
 
 	Pi := &Proof{}
 	Pi.Ci = bitcoms
-	if !linear.Satisfied(phi, w) {
-		return nil, fmt.Errorf("internal error")
+	if err = linear.Satisfied(phi, w); err != nil {
+		return nil, fmt.Errorf("internal error: %w", err)
 	}
 	Pi.Pi, err = linear.Prove(phi, w) // Todo: Check if right
 	if err != nil {

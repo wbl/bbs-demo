@@ -171,14 +171,13 @@ func NewStatement(input, output int) *Statement {
 
 }
 
-// TODO: do we want this or expose as error with where?
-func Satisfied(phi *Statement, w *Witness) bool {
+func Satisfied(phi *Statement, w *Witness) error {
 	x := make([]bls12381.G1, OutputDimension(phi))
 	for i := 0; i < len(x); i++ {
 		x[i].SetIdentity()
 	}
 	if len(w.W) != InputDimension(phi) {
-		return false
+		return errors.New("dimensions don't match")
 	}
 	t := &bls12381.G1{}
 	for i, row := range phi.F {
@@ -191,8 +190,8 @@ func Satisfied(phi *Statement, w *Witness) bool {
 
 	for i := 0; i < len(x); i++ {
 		if !phi.X[i].IsEqual(&x[i]) {
-			return false
+			return fmt.Errorf("relation %d is wrong", i)
 		}
 	}
-	return true
+	return nil
 }
