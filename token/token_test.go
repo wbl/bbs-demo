@@ -30,7 +30,7 @@ func TestShow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("showing error: %s", err)
 	}
-	if err = VerifyShowing(show, pk, 3); err != nil {
+	if err = VerifyShowing(show, pk, 3, []byte("example.com")); err != nil {
 		t.Fatalf("verification error: %s", err)
 	}
 	return

@@ -280,8 +280,48 @@ func ShowTokenWithLimit(t *Token, origin []byte, bitlimit int, k int) (*Showing,
 	return show, nil
 }
 
-func VerifyShowing(s *Showing, pk *PublicKey, bitlimit int) error {
-	return errors.New("unimplemented")
+func VerifyShowing(show *Showing, pk *PublicKey, bitlimit int, origin []byte) error {
+	if show.aprime.IsIdentity() {
+		return errors.New("A' is identity")
+	}
+	if !bls12381.ProdPairFrac([]*bls12381.G1{show.aprime, show.abar}, []*bls12381.G2{pk.w, bls12381.G2Generator()}, []int{1, -1}).IsIdentity() {
+		return errors.New("failure of pairing equation")
+	}
+	oriG := &bls12381.G1{}
+	oriG.Hash(origin, []byte("origin generator"))
+	params := systemParams()
+
+	phi := linear.NewStatement(7, 4)
+	phi.F[0][0] = *show.aprime
+	phi.F[0][1] = *params.g1
+	phi.X[0] = *show.d
+	phi.X[0].Neg()
+	phi.X[0].Add(&phi.X[0], show.abar)
+
+	phi.F[1][2] = *show.d
+	phi.F[1][3] = *params.g1
+	phi.F[1][4] = *params.h0
+	phi.F[1][4].Neg()
+
+	demo := str2Scalar(show.attribute)
+	phi.X[1].ScalarMult(demo, params.h1)
+	phi.X[1].Add(&phi.X[1], params.g0)
+
+	phi.F[2][5] = *params.h0
+	phi.F[2][6] = *params.h1
+	phi.X[2] = *show.kComm
+
+	phi.F[3][4] = *show.ticket
+	phi.F[3][5] = *show.ticket
+	phi.X[3] = *oriG
+
+	if !linear.Verify(phi, show.pi) {
+		return errors.New("failure to verify structure proof")
+	}
+	if !bound.Verify(show.kComm, &bound.Params{G: params.h0, H: params.h1}, bitlimit, show.kRangeProof) {
+		return errors.New("range proof failure")
+	}
+	return nil
 }
 
 func GetTicket(s *Showing) []byte {
